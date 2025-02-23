@@ -6,36 +6,57 @@ import uvicorn
 
 app = FastAPI()
 
-my_id = "1232089042"
-s3_bucket = f"{my_id}-in-bucket"
-db_name = f"{my_id}-simpleDB"
+ASU_ID = "1232089042"
+S3_BUCKET_NAME = f"{ASU_ID}-in-bucket"
+DOMAIN_NAME = f"{ASU_ID}-simpleDB"
 
-s3 = boto3.client('s3', region_name='us-east-1')
-db = boto3.client('sdb', region_name='us-east-1')
+s3_client = boto3.client('s3', region_name='us-east-1')
+sdb_client = boto3.client('sdb', region_name='us-east-1')
 
-async def save_file_to_s3(uploaded_file):
-    data = await uploaded_file.read()
-    name = uploaded_file.filename.split('.')[0] 
-    
-    await asyncio.to_thread(s3.put_object, Bucket=s3_bucket, Key=name, Body=data)
-    
-    return name
+async def upload_image_to_s3(file):
+    image_data = await file.read()
+    file_name = file.filename    
+    file_name = file_name.rsplit('.', 1)[0]  
 
-async def check_db(name):
-    query = f"SELECT recognition FROM `{db_name}` WHERE itemName() = '{name}'"
-    response = await asyncio.to_thread(db.select, SelectExpression=query)
+    try:
+        await asyncio.to_thread(
+            s3_client.put_object,
+            Bucket=S3_BUCKET_NAME,
+            Key=file_name,
+            Body=image_data
+        )
+    except Exception as e:
+        print(f"[ERROR] Failed to upload {file_name} to S3: {e}")
+
+    return file_name
+
+async def query_simpledb(image_id):
+    query = f"SELECT recognition FROM `{DOMAIN_NAME}` WHERE itemName() = '{image_id}'"
     
-    items = response.get('Items', [])
-    if items:
-        return items[0]['Attributes'][0]['Value']
-    return "Not found"
+    try:
+        response = await asyncio.to_thread(
+            sdb_client.select,
+            SelectExpression=query
+        )
+
+        items = response.get('Items', [])
+        if items:
+            recognition_value = items[0]['Attributes'][0]['Value']
+            return recognition_value
+
+        return "No recognition result found"
+    except Exception as e:
+        return "Error querying database"
 
 @app.post("/", response_class=PlainTextResponse)
-async def process_image(image: UploadFile = File(...)):    
-    file_name = await save_file_to_s3(image)
-    result = await check_db(file_name)
-    return f"{file_name}: {result}"
+async def handle_image(inputFile: UploadFile = File(...)):
+    
+    image_id = await upload_image_to_s3(inputFile)
+
+    recognition_result = await query_simpledb(image_id)
+
+    return f"{image_id}:{recognition_result}"
 
 if __name__ == "__main__":
-    print("Starting server...")
+    print("[DEBUG] Starting FastAPI server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
