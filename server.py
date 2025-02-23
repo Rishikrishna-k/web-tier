@@ -27,8 +27,7 @@ async def upload_image_to_s3(file):
             s3_client.put_object,
             Bucket=S3_BUCKET_NAME,
             Key=file_name,
-            Body=image_data,
-            ContentType=file.content_type
+            Body=image_data
         )
         print(f"[DEBUG] Successfully uploaded {file_name} to S3 bucket {S3_BUCKET_NAME}")
     except Exception as e:
